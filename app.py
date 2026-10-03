@@ -67,13 +67,26 @@ def sync_database(target="collection"):
         )
         conn.update(worksheet="Wishlist", data=st.session_state["wishlist_db"])
 
+def set_now_playing(index):
+    """Sets the designated index as 'Now Playing' and persists across reloads."""
+    if "Is_Playing" not in st.session_state["vinyl_db"].columns:
+        st.session_state["vinyl_db"]["Is_Playing"] = False
+    
+    st.session_state["vinyl_db"]["Is_Playing"] = False
+    if index is not None and index in st.session_state["vinyl_db"].index:
+        st.session_state["vinyl_db"].at[index, "Is_Playing"] = True
+    
+    sync_database("collection")
+
 # --- LOAD DATASETS ONCE ---
 if "vinyl_db" not in st.session_state:
     df_coll = conn.read(worksheet="Inventory", ttl=0)
     if "Cover_URL" not in df_coll.columns: df_coll["Cover_URL"] = ""
     if "Rating" not in df_coll.columns: df_coll["Rating"] = "Unrated"
+    if "Is_Playing" not in df_coll.columns: df_coll["Is_Playing"] = False
     df_coll = df_coll.dropna(subset=["Artist"])
     df_coll["Barcode"] = df_coll["Barcode"].fillna("No Barcode")
+    df_coll["Is_Playing"] = df_coll["Is_Playing"].fillna(False).astype(bool)
     df_coll["_sort"] = df_coll["Artist"].apply(get_sort_key)
     st.session_state["vinyl_db"] = (
         df_coll.sort_values(by=["_sort", "Album"])
@@ -110,6 +123,108 @@ for key, default in [
     if key not in st.session_state:
         st.session_state[key] = default
 
+# ==============================================================================
+# SIDEBAR: PERSISTENT NOW PLAYING WIDGET
+# ==============================================================================
+with st.sidebar:
+    st.markdown("## 🎵 Now Playing")
+    
+    coll_df = st.session_state["vinyl_db"]
+    
+    if not coll_df.empty:
+        # Build dropdown options list
+        options = ["None Selected"] + [f"{row['Artist']} - {row['Album']}" for _, row in coll_df.iterrows()]
+        
+        # Identify current playing index
+        playing_rows = coll_df[coll_df["Is_Playing"] == True]
+        current_idx = playing_rows.index[0] if not playing_rows.empty else None
+        current_option_idx = (list(coll_df.index).index(current_idx) + 1) if current_idx is not None else 0
+        
+        selected_option = st.selectbox(
+            "Select Record:",
+            options=options,
+            index=current_option_idx,
+            key="now_playing_select"
+        )
+        
+        selected_index = None if selected_option == "None Selected" else list(coll_df.index)[options.index(selected_option) - 1]
+        
+        if selected_index != current_idx:
+            set_now_playing(selected_index)
+            st.rerun()
+
+        if current_idx is not None and current_idx in coll_df.index:
+            playing_record = coll_df.loc[current_idx]
+            cover_url = playing_record.get("Cover_URL", "")
+            
+            # CSS Vinyl Animation
+            st.markdown(
+                """
+                <style>
+                @keyframes spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                }
+                .vinyl-container {
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    margin: 15px 0;
+                }
+                .vinyl-disc {
+                    width: 150px;
+                    height: 150px;
+                    background: radial-gradient(circle, #111 25%, #222 28%, #111 30%, #1a1a1a 65%, #050505 70%);
+                    border-radius: 50%;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+                    animation: spin 3.5s linear infinite;
+                }
+                .vinyl-label {
+                    width: 65px;
+                    height: 65px;
+                    border-radius: 50%;
+                    overflow: hidden;
+                    border: 2px solid #222;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    background-color: #333;
+                }
+                .vinyl-label img {
+                    width: 100%;
+                    height: 100%;
+                    object-fit: cover;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True
+            )
+            
+            img_html = f'<img src="{cover_url}" />' if pd.notna(cover_url) and str(cover_url).startswith("http") else '<span style="font-size:24px;">💿</span>'
+            
+            st.markdown(
+                f"""
+                <div class="vinyl-container">
+                    <div class="vinyl-disc">
+                        <div class="vinyl-label">
+                            {img_html}
+                        </div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+            
+            st.markdown(f"**{playing_record['Album']}**")
+            st.caption(f"By {playing_record['Artist']}")
+        else:
+            st.info("No record currently spinning.")
+    else:
+        st.info("Your collection is empty.")
+
 # --- TOP-LEVEL NAVIGATION TABS ---
 tab_collection_page, tab_wishlist_page = st.tabs(["📀 My Collection", "🎁 Wishlist"])
 
@@ -142,7 +257,7 @@ with tab_collection_page:
                         new_row = pd.DataFrame([{
                             "Barcode": barcode, "Artist": artist, "Album": album,
                             "Year": match.get("year", "Unknown"), "Genre": ", ".join(match.get("genre", [])),
-                            "Cover_URL": match.get("cover_image", ""), "Rating": "Unrated"
+                            "Cover_URL": match.get("cover_image", ""), "Rating": "Unrated", "Is_Playing": False
                         }])
                         
                         st.session_state["vinyl_db"] = pd.concat([st.session_state["vinyl_db"], new_row], ignore_index=True)
@@ -175,7 +290,7 @@ with tab_collection_page:
                         new_row = pd.DataFrame([{
                             "Barcode": "No Barcode", "Artist": artist, "Album": album,
                             "Year": match.get("year", "Unknown"), "Genre": ", ".join(match.get("genre", [])),
-                            "Cover_URL": match.get("cover_image", ""), "Rating": "Unrated"
+                            "Cover_URL": match.get("cover_image", ""), "Rating": "Unrated", "Is_Playing": False
                         }])
                         
                         st.session_state["vinyl_db"] = pd.concat([st.session_state["vinyl_db"], new_row], ignore_index=True)
@@ -206,7 +321,7 @@ with tab_collection_page:
                             "Artist": m_artist, "Album": m_album,
                             "Year": m_year if m_year else "Unknown",
                             "Genre": m_genre if m_genre else "Unknown",
-                            "Cover_URL": m_cover, "Rating": m_rating
+                            "Cover_URL": m_cover, "Rating": m_rating, "Is_Playing": False
                         }])
                         st.session_state["vinyl_db"] = pd.concat([st.session_state["vinyl_db"], manual_row], ignore_index=True)
                         sync_database("collection")
@@ -275,10 +390,17 @@ with tab_collection_page:
                                 st.write("💿 No Cover Art")
                             
                             st.markdown(f"**{row['Album']}**")
-                            st.caption(f"{row['Artist']} ({row['Year']})")
+                            st.caption(f"{row['Artist']}")
                             if row.get("Rating", "Unrated") != "Unrated":
                                 st.write(row["Rating"])
                             
+                            # Play Button
+                            is_currently_playing = row.get("Is_Playing", False)
+                            btn_label = "🔊 Playing" if is_currently_playing else "▶️ Play"
+                            if st.button(btn_label, key=f"play_coll_{index}"):
+                                set_now_playing(index)
+                                st.rerun()
+
                             if st.button("✏️ Edit", key=f"edit_coll_{index}"):
                                 st.session_state["edit_row_coll"] = index
                                 st.rerun()
@@ -458,6 +580,7 @@ with tab_wishlist_page:
                             if st.button("📦 Move to Collection", key=f"move_wish_{index}"):
                                 clean_cols = ["Barcode", "Artist", "Album", "Year", "Genre", "Cover_URL", "Rating"]
                                 moved_row = pd.DataFrame([{col: row.get(col, "") for col in clean_cols}])
+                                moved_row["Is_Playing"] = False
                                 # 1. Add to collection
                                 st.session_state["vinyl_db"] = pd.concat([st.session_state["vinyl_db"], moved_row], ignore_index=True)
                                 sync_database("collection")
