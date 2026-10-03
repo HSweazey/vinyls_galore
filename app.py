@@ -31,6 +31,27 @@ except Exception:
 # 1. Connect to Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
 
+# Load from Google Sheets ONLY once when the app opens
+if "vinyl_db" not in st.session_state:
+    df = conn.read(worksheet="Sheet1", ttl=0)
+    
+    if "Cover_URL" not in df.columns:
+        df["Cover_URL"] = ""
+    if "Rating" not in df.columns:
+        df["Rating"] = "Unrated"
+        
+    # --- THE FIX ---
+    # Drop rows where Artist is empty (this cleans up Google's blank rows safely)
+    df = df.dropna(subset=["Artist"])
+    
+    # Fill in any missing barcodes (or "N/A"s that pandas erased) so they don't break the app
+    df["Barcode"] = df["Barcode"].fillna("No Barcode")
+    # ---------------
+    
+    # Sort the initial load before saving to state
+    df = df.sort_values(by=["Artist", "Album"]).reset_index(drop=True)
+    st.session_state["vinyl_db"] = df
+    
 # --- NEW: CENTRALIZED SORT & SAVE FUNCTION ---
 def sync_database():
     # 1. Sort alphabetically by Artist, then Album
