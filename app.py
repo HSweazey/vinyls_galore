@@ -28,26 +28,58 @@ except Exception:
     pass
 # --- END OF MOBILE ICON HACK ---
 
+# --- HELPER FUNCTIONS FOR RECORD STORE SORTING ---
+def get_sort_key(artist):
+    """Returns the artist name with leading 'The ' stripped for proper record store sorting."""
+    artist_str = str(artist).strip() if pd.notna(artist) else ""
+    if artist_str.lower().startswith("the "):
+        artist_str = artist_str[4:].strip()
+    return artist_str.upper()
+
+def get_artist_letter(artist):
+    """Returns the primary letter header (A-Z) or '#' for numbers/symbols."""
+    sort_key = get_sort_key(artist)
+    if sort_key and sort_key[0].isalpha():
+        return sort_key[0]
+    return "#"
+
 # 1. Connect to Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- CENTRALIZED SYNC FUNCTION ---
 def sync_database(target="collection"):
     if target == "collection":
-        st.session_state["vinyl_db"] = st.session_state["vinyl_db"].sort_values(by=["Artist", "Album"]).reset_index(drop=True)
-        conn.update(worksheet="Inventory", data=st.session_state["vinyl_db"])
+        st.session_state["vinyl_db"]["_sort"] = st.session_state["vinyl_db"]["Artist"].apply(get_sort_key)
+        st.session_state["vinyl_db"] = (
+            st.session_state["vinyl_db"]
+            .sort_values(by=["_sort", "Album"])
+            .drop(columns=["_sort"])
+            .reset_index(drop=True)
+        )
+        conn.update(worksheet="Sheet1", data=st.session_state["vinyl_db"])
     elif target == "wishlist":
-        st.session_state["wishlist_db"] = st.session_state["wishlist_db"].sort_values(by=["Artist", "Album"]).reset_index(drop=True)
+        st.session_state["wishlist_db"]["_sort"] = st.session_state["wishlist_db"]["Artist"].apply(get_sort_key)
+        st.session_state["wishlist_db"] = (
+            st.session_state["wishlist_db"]
+            .sort_values(by=["_sort", "Album"])
+            .drop(columns=["_sort"])
+            .reset_index(drop=True)
+        )
         conn.update(worksheet="Wishlist", data=st.session_state["wishlist_db"])
 
 # --- LOAD DATASETS ONCE ---
 if "vinyl_db" not in st.session_state:
-    df_coll = conn.read(worksheet="Inventory", ttl=0)
+    df_coll = conn.read(worksheet="Sheet1", ttl=0)
     if "Cover_URL" not in df_coll.columns: df_coll["Cover_URL"] = ""
     if "Rating" not in df_coll.columns: df_coll["Rating"] = "Unrated"
     df_coll = df_coll.dropna(subset=["Artist"])
     df_coll["Barcode"] = df_coll["Barcode"].fillna("No Barcode")
-    st.session_state["vinyl_db"] = df_coll.sort_values(by=["Artist", "Album"]).reset_index(drop=True)
+    df_coll["_sort"] = df_coll["Artist"].apply(get_sort_key)
+    st.session_state["vinyl_db"] = (
+        df_coll.sort_values(by=["_sort", "Album"])
+        .drop(columns=["_sort"])
+        .reset_index(drop=True)
+    )
 
 if "wishlist_db" not in st.session_state:
     try:
@@ -59,7 +91,12 @@ if "wishlist_db" not in st.session_state:
     if "Rating" not in df_wish.columns: df_wish["Rating"] = "Unrated"
     df_wish = df_wish.dropna(subset=["Artist"])
     df_wish["Barcode"] = df_wish["Barcode"].fillna("No Barcode")
-    st.session_state["wishlist_db"] = df_wish.sort_values(by=["Artist", "Album"]).reset_index(drop=True)
+    df_wish["_sort"] = df_wish["Artist"].apply(get_sort_key)
+    st.session_state["wishlist_db"] = (
+        df_wish.sort_values(by=["_sort", "Album"])
+        .drop(columns=["_sort"])
+        .reset_index(drop=True)
+    )
 
 DISCOGS_TOKEN = st.secrets["DISCOGS_TOKEN"]
 USER_AGENT = "MyVinylScannerApp/1.0"
@@ -182,10 +219,15 @@ with tab_collection_page:
     with col_right:
         st.subheader(f"Collection ({len(st.session_state['vinyl_db'])} Records)")
         
-        # --- LOCAL COLLECTION SEARCH BAR ---
+        # Search Filter
         filter_coll = st.text_input("🔎 Search Collection by Artist or Title:", key="filter_coll_input")
         
-        display_coll_df = st.session_state["vinyl_db"]
+        display_coll_df = st.session_state["vinyl_db"].copy()
+        display_coll_df["_orig_idx"] = display_coll_df.index
+        display_coll_df["_sort_artist"] = display_coll_df["Artist"].apply(get_sort_key)
+        display_coll_df["_sort_album"] = display_coll_df["Album"].astype(str).str.upper()
+        display_coll_df["_letter"] = display_coll_df["Artist"].apply(get_artist_letter)
+
         if filter_coll.strip():
             query = filter_coll.strip().lower()
             display_coll_df = display_coll_df[
@@ -193,50 +235,58 @@ with tab_collection_page:
                 display_coll_df["Album"].astype(str).str.lower().str.contains(query)
             ]
 
+        display_coll_df = display_coll_df.sort_values(by=["_sort_artist", "_sort_album"])
+
         if not display_coll_df.empty:
-            grid_cols = st.columns(4)
-            for idx, (index, row) in enumerate(display_coll_df.iterrows()):
-                with grid_cols[idx % 4]:
-                    if st.session_state["edit_row_coll"] == index:
-                        st.markdown("**Editing Record...**")
-                        e_artist = st.text_input("Artist", value=row["Artist"], key=f"e_art_coll_{index}")
-                        e_album = st.text_input("Album", value=row["Album"], key=f"e_alb_coll_{index}")
-                        r_opts = ["Unrated", "⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"]
-                        curr_r = row.get("Rating", "Unrated") if pd.notna(row.get("Rating")) and row.get("Rating") in r_opts else "Unrated"
-                        e_rating = st.selectbox("Rating", options=r_opts, index=r_opts.index(curr_r), key=f"e_rat_coll_{index}")
-                        
-                        col_save, col_cancel = st.columns(2)
-                        with col_save:
-                            if st.button("💾 Save", key=f"save_coll_{index}"):
-                                st.session_state["vinyl_db"].at[index, "Artist"] = e_artist
-                                st.session_state["vinyl_db"].at[index, "Album"] = e_album
-                                st.session_state["vinyl_db"].at[index, "Rating"] = e_rating
+            for letter, letter_df in display_coll_df.groupby("_letter", sort=False):
+                # Section Header / Divider
+                st.markdown(f"### 🏷️ **{letter}**")
+                st.divider()
+
+                grid_cols = st.columns(4)
+                for idx, (_, row) in enumerate(letter_df.iterrows()):
+                    index = int(row["_orig_idx"])
+                    with grid_cols[idx % 4]:
+                        if st.session_state["edit_row_coll"] == index:
+                            st.markdown("**Editing Record...**")
+                            e_artist = st.text_input("Artist", value=row["Artist"], key=f"e_art_coll_{index}")
+                            e_album = st.text_input("Album", value=row["Album"], key=f"e_alb_coll_{index}")
+                            r_opts = ["Unrated", "⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"]
+                            curr_r = row.get("Rating", "Unrated") if pd.notna(row.get("Rating")) and row.get("Rating") in r_opts else "Unrated"
+                            e_rating = st.selectbox("Rating", options=r_opts, index=r_opts.index(curr_r), key=f"e_rat_coll_{index}")
+                            
+                            col_save, col_cancel = st.columns(2)
+                            with col_save:
+                                if st.button("💾 Save", key=f"save_coll_{index}"):
+                                    st.session_state["vinyl_db"].at[index, "Artist"] = e_artist
+                                    st.session_state["vinyl_db"].at[index, "Album"] = e_album
+                                    st.session_state["vinyl_db"].at[index, "Rating"] = e_rating
+                                    sync_database("collection")
+                                    st.session_state["edit_row_coll"] = None
+                                    st.rerun()
+                            with col_cancel:
+                                if st.button("❌ Cancel", key=f"cancel_coll_{index}"):
+                                    st.session_state["edit_row_coll"] = None
+                                    st.rerun()
+                        else:
+                            if pd.notna(row.get("Cover_URL")) and str(row["Cover_URL"]).startswith("http"):
+                                st.image(row["Cover_URL"], use_container_width=True)
+                            else:
+                                st.write("💿 No Cover Art")
+                            
+                            st.markdown(f"**{row['Album']}**")
+                            st.caption(f"{row['Artist']}")
+                            if row.get("Rating", "Unrated") != "Unrated":
+                                st.write(row["Rating"])
+                            
+                            if st.button("✏️ Edit", key=f"edit_coll_{index}"):
+                                st.session_state["edit_row_coll"] = index
+                                st.rerun()
+                            if st.button("🗑 Delete", key=f"del_coll_{index}"):
+                                st.session_state["vinyl_db"] = st.session_state["vinyl_db"].drop(index).reset_index(drop=True)
                                 sync_database("collection")
                                 st.session_state["edit_row_coll"] = None
                                 st.rerun()
-                        with col_cancel:
-                            if st.button("❌ Cancel", key=f"cancel_coll_{index}"):
-                                st.session_state["edit_row_coll"] = None
-                                st.rerun()
-                    else:
-                        if pd.notna(row.get("Cover_URL")) and str(row["Cover_URL"]).startswith("http"):
-                            st.image(row["Cover_URL"], use_container_width=True)
-                        else:
-                            st.write("💿 No Cover Art")
-                        
-                        st.markdown(f"**{row['Album']}**")
-                        st.caption(f"{row['Artist']}")
-                        if row.get("Rating", "Unrated") != "Unrated":
-                            st.write(row["Rating"])
-                        
-                        if st.button("✏️ Edit", key=f"edit_coll_{index}"):
-                            st.session_state["edit_row_coll"] = index
-                            st.rerun()
-                        if st.button("🗑 Delete", key=f"del_coll_{index}"):
-                            st.session_state["vinyl_db"] = st.session_state["vinyl_db"].drop(index).reset_index(drop=True)
-                            sync_database("collection")
-                            st.session_state["edit_row_coll"] = None
-                            st.rerun()
         else:
             st.info("No matching records found in collection.")
 
@@ -346,10 +396,15 @@ with tab_wishlist_page:
     with col_right_w:
         st.subheader(f"Wishlist ({len(st.session_state['wishlist_db'])} Records)")
         
-        # --- LOCAL WISHLIST SEARCH BAR ---
+        # Search Filter
         filter_wish = st.text_input("🔎 Search Wishlist by Artist or Title:", key="filter_wish_input")
         
-        display_wish_df = st.session_state["wishlist_db"]
+        display_wish_df = st.session_state["wishlist_db"].copy()
+        display_wish_df["_orig_idx"] = display_wish_df.index
+        display_wish_df["_sort_artist"] = display_wish_df["Artist"].apply(get_sort_key)
+        display_wish_df["_sort_album"] = display_wish_df["Album"].astype(str).str.upper()
+        display_wish_df["_letter"] = display_wish_df["Artist"].apply(get_artist_letter)
+
         if filter_wish.strip():
             query_w = filter_wish.strip().lower()
             display_wish_df = display_wish_df[
@@ -357,58 +412,67 @@ with tab_wishlist_page:
                 display_wish_df["Album"].astype(str).str.lower().str.contains(query_w)
             ]
 
+        display_wish_df = display_wish_df.sort_values(by=["_sort_artist", "_sort_album"])
+
         if not display_wish_df.empty:
-            grid_cols_w = st.columns(4)
-            for idx, (index, row) in enumerate(display_wish_df.iterrows()):
-                with grid_cols_w[idx % 4]:
-                    if st.session_state["edit_row_wish"] == index:
-                        st.markdown("**Editing Wishlist Item...**")
-                        we_artist = st.text_input("Artist", value=row["Artist"], key=f"we_art_wish_{index}")
-                        we_album = st.text_input("Album", value=row["Album"], key=f"we_alb_wish_{index}")
-                        r_opts = ["Unrated", "⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"]
-                        curr_r = row.get("Rating", "Unrated") if pd.notna(row.get("Rating")) and row.get("Rating") in r_opts else "Unrated"
-                        we_rating = st.selectbox("Rating", options=r_opts, index=r_opts.index(curr_r), key=f"we_rat_wish_{index}")
-                        
-                        col_save, col_cancel = st.columns(2)
-                        with col_save:
-                            if st.button("💾 Save", key=f"save_wish_{index}"):
-                                st.session_state["wishlist_db"].at[index, "Artist"] = we_artist
-                                st.session_state["wishlist_db"].at[index, "Album"] = we_album
-                                st.session_state["wishlist_db"].at[index, "Rating"] = we_rating
+            for letter, letter_df in display_wish_df.groupby("_letter", sort=False):
+                # Section Header / Divider
+                st.markdown(f"### 🏷️ **{letter}**")
+                st.divider()
+
+                grid_cols_w = st.columns(4)
+                for idx, (_, row) in enumerate(letter_df.iterrows()):
+                    index = int(row["_orig_idx"])
+                    with grid_cols_w[idx % 4]:
+                        if st.session_state["edit_row_wish"] == index:
+                            st.markdown("**Editing Wishlist Item...**")
+                            we_artist = st.text_input("Artist", value=row["Artist"], key=f"we_art_wish_{index}")
+                            we_album = st.text_input("Album", value=row["Album"], key=f"we_alb_wish_{index}")
+                            r_opts = ["Unrated", "⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"]
+                            curr_r = row.get("Rating", "Unrated") if pd.notna(row.get("Rating")) and row.get("Rating") in r_opts else "Unrated"
+                            we_rating = st.selectbox("Rating", options=r_opts, index=r_opts.index(curr_r), key=f"we_rat_wish_{index}")
+                            
+                            col_save, col_cancel = st.columns(2)
+                            with col_save:
+                                if st.button("💾 Save", key=f"save_wish_{index}"):
+                                    st.session_state["wishlist_db"].at[index, "Artist"] = we_artist
+                                    st.session_state["wishlist_db"].at[index, "Album"] = we_album
+                                    st.session_state["wishlist_db"].at[index, "Rating"] = we_rating
+                                    sync_database("wishlist")
+                                    st.session_state["edit_row_wish"] = None
+                                    st.rerun()
+                            with col_cancel:
+                                if st.button("❌ Cancel", key=f"cancel_wish_{index}"):
+                                    st.session_state["edit_row_wish"] = None
+                                    st.rerun()
+                        else:
+                            if pd.notna(row.get("Cover_URL")) and str(row["Cover_URL"]).startswith("http"):
+                                st.image(row["Cover_URL"], use_container_width=True)
+                            else:
+                                st.write("💿 No Cover Art")
+                            
+                            st.markdown(f"**{row['Album']}**")
+                            st.caption(f"{row['Artist']}")
+                            
+                            # Move to Collection Button
+                            if st.button("📦 Move to Collection", key=f"move_wish_{index}"):
+                                clean_cols = ["Barcode", "Artist", "Album", "Year", "Genre", "Cover_URL", "Rating"]
+                                moved_row = pd.DataFrame([{col: row.get(col, "") for col in clean_cols}])
+                                # 1. Add to collection
+                                st.session_state["vinyl_db"] = pd.concat([st.session_state["vinyl_db"], moved_row], ignore_index=True)
+                                sync_database("collection")
+                                # 2. Remove from wishlist
+                                st.session_state["wishlist_db"] = st.session_state["wishlist_db"].drop(index).reset_index(drop=True)
+                                sync_database("wishlist")
+                                st.rerun()
+
+                            if st.button("✏️ Edit", key=f"edit_wish_{index}"):
+                                st.session_state["edit_row_wish"] = index
+                                st.rerun()
+                            if st.button("🗑 Delete", key=f"del_wish_{index}"):
+                                st.session_state["wishlist_db"] = st.session_state["wishlist_db"].drop(index).reset_index(drop=True)
                                 sync_database("wishlist")
                                 st.session_state["edit_row_wish"] = None
                                 st.rerun()
-                        with col_cancel:
-                            if st.button("❌ Cancel", key=f"cancel_wish_{index}"):
-                                st.session_state["edit_row_wish"] = None
-                                st.rerun()
-                    else:
-                        if pd.notna(row.get("Cover_URL")) and str(row["Cover_URL"]).startswith("http"):
-                            st.image(row["Cover_URL"], use_container_width=True)
-                        else:
-                            st.write("💿 No Cover Art")
-                        
-                        st.markdown(f"**{row['Album']}**")
-                        st.caption(f"{row['Artist']}")
-                        
-                        # Move to Collection Button
-                        if st.button("📦 Move to Collection", key=f"move_wish_{index}"):
-                            moved_row = row.to_frame().T
-                            # 1. Add to collection
-                            st.session_state["vinyl_db"] = pd.concat([st.session_state["vinyl_db"], moved_row], ignore_index=True)
-                            sync_database("collection")
-                            # 2. Remove from wishlist
-                            st.session_state["wishlist_db"] = st.session_state["wishlist_db"].drop(index).reset_index(drop=True)
-                            sync_database("wishlist")
-                            st.rerun()
-
-                        if st.button("✏️ Edit", key=f"edit_wish_{index}"):
-                            st.session_state["edit_row_wish"] = index
-                            st.rerun()
-                        if st.button("🗑 Delete", key=f"del_wish_{index}"):
-                            st.session_state["wishlist_db"] = st.session_state["wishlist_db"].drop(index).reset_index(drop=True)
-                            sync_database("wishlist")
-                            st.session_state["edit_row_wish"] = None
-                            st.rerun()
         else:
             st.info("No matching records found in wishlist.")
