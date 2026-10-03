@@ -35,14 +35,14 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 def sync_database(target="collection"):
     if target == "collection":
         st.session_state["vinyl_db"] = st.session_state["vinyl_db"].sort_values(by=["Artist", "Album"]).reset_index(drop=True)
-        conn.update(worksheet="Sheet1", data=st.session_state["vinyl_db"])
+        conn.update(worksheet="Inventory", data=st.session_state["vinyl_db"])
     elif target == "wishlist":
         st.session_state["wishlist_db"] = st.session_state["wishlist_db"].sort_values(by=["Artist", "Album"]).reset_index(drop=True)
         conn.update(worksheet="Wishlist", data=st.session_state["wishlist_db"])
 
 # --- LOAD DATASETS ONCE ---
 if "vinyl_db" not in st.session_state:
-    df_coll = conn.read(worksheet="Sheet1", ttl=0)
+    df_coll = conn.read(worksheet="Inventory", ttl=0)
     if "Cover_URL" not in df_coll.columns: df_coll["Cover_URL"] = ""
     if "Rating" not in df_coll.columns: df_coll["Rating"] = "Unrated"
     df_coll = df_coll.dropna(subset=["Artist"])
