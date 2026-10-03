@@ -19,7 +19,7 @@ try:
             if (old) old.remove();
             var link = document.createElement('link');
             link.rel = 'apple-touch-icon';
-            link.href = 'data:vinyl/png;base64,{encoded}';
+            link.href = 'data:image/png;base64,{encoded}';
             document.head.appendChild(link);
         " style="display:none;">
         """,
