@@ -3,8 +3,9 @@ import requests
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 
-# Expand layout to fit a grid
-st.set_page_config(layout="wide", page_title="My Vinyl Collection")
+# Update the top of your app.py to include page_icon
+st.set_page_config(layout="wide", page_title="My Vinyl Collection", page_icon="💿")
+
 st.title("💿 Vinyl Database Scanner")
 
 # 1. Connect to Google Sheets (ttl=0 forces fresh data)
