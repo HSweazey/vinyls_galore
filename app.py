@@ -2,9 +2,31 @@ import streamlit as st
 import requests
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
+import base64  # <-- Add this new import
 
-# Update the top of your app.py to include page_icon
-st.set_page_config(layout="wide", page_title="My Vinyl Collection", page_icon="pink_vinyl.png")
+# Expand layout to fit a grid
+st.set_page_config(layout="wide", page_title="My Vinyl Collection", page_icon="icon.png")
+
+# --- START OF MOBILE ICON HACK ---
+try:
+    with open("icon.png", "rb") as f:
+        encoded = base64.b64encode(f.read()).decode()
+    
+    st.markdown(
+        f"""
+        <img src="dummy" onerror="
+            var old = document.querySelector('link[rel=apple-touch-icon]');
+            if (old) old.remove();
+            var link = document.createElement('link');
+            link.rel = 'apple-touch-icon';
+            link.href = 'data:image/png;base64,{encoded}';
+            document.head.appendChild(link);
+        " style="display:none;">
+        """,
+        unsafe_allow_html=True,
+    )
+except Exception:
+    pass
 
 st.title("💿 Vinyl Database Scanner")
 
