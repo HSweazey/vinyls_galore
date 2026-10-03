@@ -2,14 +2,14 @@ import streamlit as st
 import requests
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
-import base64  # <-- Add this new import
+import base64
 
 # Expand layout to fit a grid
-st.set_page_config(layout="wide", page_title="My Vinyl Collection", page_icon="pink_vinyl.png")
+st.set_page_config(layout="wide", page_title="My Vinyl Collection", page_icon="vinyl.png")
 
 # --- START OF MOBILE ICON HACK ---
 try:
-    with open("pink_vinyl.png", "rb") as f:
+    with open("vinyl.png", "rb") as f:
         encoded = base64.b64encode(f.read()).decode()
     
     st.markdown(
@@ -27,39 +27,40 @@ try:
     )
 except Exception:
     pass
+# --- END OF MOBILE ICON HACK ---
 
-st.title("💿 Vinyl Database Scanner")
-
-# 1. Connect to Google Sheets (ttl=0 forces fresh data)
+# 1. Connect to Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
-existing_data = conn.read(worksheet="Sheet1", ttl=0)
 
-# Clean data: Ensure missing columns exist and drop completely empty rows
-if "Cover_URL" not in existing_data.columns:
-    existing_data["Cover_URL"] = ""
-if "Rating" not in existing_data.columns:
-    existing_data["Rating"] = "Unrated"
+# --- STATE MANAGEMENT FIX ---
+# Load from Google Sheets ONLY once when the app opens, then use local memory
+if "vinyl_db" not in st.session_state:
+    df = conn.read(worksheet="Sheet1", ttl=0)
     
-existing_data = existing_data.dropna(subset=["Barcode"]).reset_index(drop=True)
+    if "Cover_URL" not in df.columns:
+        df["Cover_URL"] = ""
+    if "Rating" not in df.columns:
+        df["Rating"] = "Unrated"
+        
+    st.session_state["vinyl_db"] = df.dropna(subset=["Barcode"]).reset_index(drop=True)
 
 DISCOGS_TOKEN = st.secrets["DISCOGS_TOKEN"]
 USER_AGENT = "MyVinylScannerApp/1.0"
 
-# Initialize session states
+# Initialize other session states
 if "show_manual" not in st.session_state:
     st.session_state["show_manual"] = False
 if "failed_barcode" not in st.session_state:
     st.session_state["failed_barcode"] = ""
 if "edit_row" not in st.session_state:
-    st.session_state["edit_row"] = None # Tracks which record is being edited
+    st.session_state["edit_row"] = None
 
-# Split screen into Left (Scanner & Manual Entry) and Right (Gallery)
+# Split screen into Left (Forms) and Right (Gallery)
 col_left, col_right = st.columns([1, 2])
 
 with col_left:
     st.subheader("Add New Record")
     
-    # Organize the search methods into tabs
     tab_scan, tab_text = st.tabs(["📷 Scan Barcode", "🔍 Search by Name"])
     
     # --- TAB 1: BARCODE SCANNER ---
@@ -75,7 +76,6 @@ with col_left:
                 
                 if response.status_code == 200:
                     results = response.json().get("results", [])
-                    
                     if results:
                         match = results[0]
                         title_split = match.get("title", "Unknown - Unknown").split(" - ", 1)
@@ -86,17 +86,13 @@ with col_left:
                         cover_url = match.get("cover_image", "") 
                         
                         new_row = pd.DataFrame([{
-                            "Barcode": barcode,
-                            "Artist": artist,
-                            "Album": album,
-                            "Year": year,
-                            "Genre": genre,
-                            "Cover_URL": cover_url,
-                            "Rating": "Unrated"
+                            "Barcode": barcode, "Artist": artist, "Album": album,
+                            "Year": year, "Genre": genre, "Cover_URL": cover_url, "Rating": "Unrated"
                         }])
                         
-                        existing_data = pd.concat([existing_data, new_row], ignore_index=True)
-                        conn.update(worksheet="Sheet1", data=existing_data)
+                        # Update local memory FIRST, then backup to Google
+                        st.session_state["vinyl_db"] = pd.concat([st.session_state["vinyl_db"], new_row], ignore_index=True)
+                        conn.update(worksheet="Sheet1", data=st.session_state["vinyl_db"])
                         
                         st.session_state["show_manual"] = False
                         st.session_state["failed_barcode"] = ""
@@ -118,18 +114,11 @@ with col_left:
             
         if submitted_text and (search_artist or search_title):
             with st.spinner(f"Querying Discogs for '{search_title}' by '{search_artist}'..."):
-                # Using a params dictionary safely handles spaces and special characters in names
-                params = {
-                    "artist": search_artist,
-                    "title": search_title,
-                    "format": "vinyl",
-                    "token": DISCOGS_TOKEN
-                }
+                params = {"artist": search_artist, "title": search_title, "format": "vinyl", "token": DISCOGS_TOKEN}
                 response = requests.get("https://api.discogs.com/database/search", headers={"User-Agent": USER_AGENT}, params=params)
                 
                 if response.status_code == 200:
                     results = response.json().get("results", [])
-                    
                     if results:
                         match = results[0]
                         title_split = match.get("title", "Unknown - Unknown").split(" - ", 1)
@@ -140,21 +129,17 @@ with col_left:
                         cover_url = match.get("cover_image", "") 
                         
                         new_row = pd.DataFrame([{
-                            "Barcode": "N/A",  # No barcode for text searches
-                            "Artist": artist,
-                            "Album": album,
-                            "Year": year,
-                            "Genre": genre,
-                            "Cover_URL": cover_url,
-                            "Rating": "Unrated"
+                            "Barcode": "N/A", "Artist": artist, "Album": album,
+                            "Year": year, "Genre": genre, "Cover_URL": cover_url, "Rating": "Unrated"
                         }])
                         
-                        existing_data = pd.concat([existing_data, new_row], ignore_index=True)
-                        conn.update(worksheet="Sheet1", data=existing_data)
+                        # Update local memory FIRST, then backup to Google
+                        st.session_state["vinyl_db"] = pd.concat([st.session_state["vinyl_db"], new_row], ignore_index=True)
+                        conn.update(worksheet="Sheet1", data=st.session_state["vinyl_db"])
                         
                         st.session_state["show_manual"] = False
                         st.session_state["edit_row"] = None
-                        st.success(f"Successfully saved top vinyl match: **{artist} - {album}**")
+                        st.success(f"Successfully saved: **{artist} - {album}**")
                     else:
                         st.session_state["show_manual"] = True
                         st.error("No vinyl records found matching that search. Fill out the manual form below:")
@@ -178,43 +163,36 @@ with col_left:
                 if m_artist and m_album:
                     manual_row = pd.DataFrame([{
                         "Barcode": m_barcode if m_barcode else "N/A",
-                        "Artist": m_artist,
-                        "Album": m_album,
+                        "Artist": m_artist, "Album": m_album,
                         "Year": m_year if m_year else "Unknown",
                         "Genre": m_genre if m_genre else "Unknown",
-                        "Cover_URL": m_cover,
-                        "Rating": m_rating
+                        "Cover_URL": m_cover, "Rating": m_rating
                     }])
                     
-                    # 1. Update the in-memory dataframe instantly
-                    existing_data = pd.concat([existing_data, manual_row], ignore_index=True)
+                    # Update local memory FIRST, then backup to Google
+                    st.session_state["vinyl_db"] = pd.concat([st.session_state["vinyl_db"], manual_row], ignore_index=True)
+                    conn.update(worksheet="Sheet1", data=st.session_state["vinyl_db"])
                     
-                    # 2. Send the update to Google Sheets in the background
-                    conn.update(worksheet="Sheet1", data=existing_data)
-                    
-                    # 3. Reset session states
                     st.session_state["show_manual"] = False
                     st.session_state["failed_barcode"] = ""
                     st.session_state["edit_row"] = None
                     
-                    # 4. Show success message (st.rerun has been removed so you can actually see this)
                     st.success(f"Manually saved: **{m_artist} - {m_album}**")
                 else:
                     st.error("Artist and Album Title are required.")
 
 with col_right:
-    st.subheader(f"My Collection ({len(existing_data)} Records)")
+    st.subheader(f"My Collection ({len(st.session_state['vinyl_db'])} Records)")
     
-    # 5. Display the collection as a visual grid
-    if not existing_data.empty:
+    # --- VISUAL GALLERY ---
+    if not st.session_state["vinyl_db"].empty:
         grid_cols = st.columns(4)
         
-        for index, row in existing_data.iterrows():
+        for index, row in st.session_state["vinyl_db"].iterrows():
             with grid_cols[index % 4]:
                 
                 # Check if this specific record is in "Edit Mode"
                 if st.session_state["edit_row"] == index:
-                    # EDIT MODE UI
                     st.markdown("**Editing Record...**")
                     edit_artist = st.text_input("Artist", value=row["Artist"], key=f"edit_art_{index}")
                     edit_album = st.text_input("Album", value=row["Album"], key=f"edit_alb_{index}")
@@ -229,10 +207,10 @@ with col_right:
                     col_save, col_cancel = st.columns(2)
                     with col_save:
                         if st.button("💾 Save", key=f"save_{index}"):
-                            existing_data.at[index, "Artist"] = edit_artist
-                            existing_data.at[index, "Album"] = edit_album
-                            existing_data.at[index, "Rating"] = edit_rating
-                            conn.update(worksheet="Sheet1", data=existing_data)
+                            st.session_state["vinyl_db"].at[index, "Artist"] = edit_artist
+                            st.session_state["vinyl_db"].at[index, "Album"] = edit_album
+                            st.session_state["vinyl_db"].at[index, "Rating"] = edit_rating
+                            conn.update(worksheet="Sheet1", data=st.session_state["vinyl_db"])
                             st.session_state["edit_row"] = None
                             st.rerun()
                     with col_cancel:
@@ -241,7 +219,7 @@ with col_right:
                             st.rerun()
                             
                 else:
-                    # VIEW MODE UI (Default)
+                    # View Mode UI
                     if pd.notna(row.get("Cover_URL")) and str(row["Cover_URL"]).startswith("http"):
                         st.image(row["Cover_URL"], use_container_width=True)
                     else:
@@ -250,18 +228,17 @@ with col_right:
                     st.markdown(f"**{row['Album']}**")
                     st.caption(f"{row['Artist']}")
                     
-                    # Display rating as plain text instead of a dropdown
                     display_rating = row.get("Rating", "Unrated")
                     if display_rating != "Unrated":
                         st.write(display_rating)
                     
-                    # Edit & Delete Buttons
                     if st.button("✏️ Edit Record", key=f"edit_{index}"):
                         st.session_state["edit_row"] = index
                         st.rerun()
                         
-                    if st.button("🗑️ Delete", key=f"delete_{index}"):
-                        existing_data = existing_data.drop(index)
-                        conn.update(worksheet="Sheet1", data=existing_data)
-                        st.session_state["edit_row"] = None # Reset edit state to prevent UI glitches
+                    if st.button("🗑️️ Delete", key=f"delete_{index}"):
+                        # Drop row and reset index so grid placement remains stable
+                        st.session_state["vinyl_db"] = st.session_state["vinyl_db"].drop(index).reset_index(drop=True)
+                        conn.update(worksheet="Sheet1", data=st.session_state["vinyl_db"])
+                        st.session_state["edit_row"] = None
                         st.rerun()
