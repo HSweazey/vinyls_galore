@@ -181,10 +181,22 @@ with tab_collection_page:
 
     with col_right:
         st.subheader(f"Collection ({len(st.session_state['vinyl_db'])} Records)")
-        if not st.session_state["vinyl_db"].empty:
+        
+        # --- LOCAL COLLECTION SEARCH BAR ---
+        filter_coll = st.text_input("🔎 Search Collection by Artist or Title:", key="filter_coll_input")
+        
+        display_coll_df = st.session_state["vinyl_db"]
+        if filter_coll.strip():
+            query = filter_coll.strip().lower()
+            display_coll_df = display_coll_df[
+                display_coll_df["Artist"].astype(str).str.lower().str.contains(query) |
+                display_coll_df["Album"].astype(str).str.lower().str.contains(query)
+            ]
+
+        if not display_coll_df.empty:
             grid_cols = st.columns(4)
-            for index, row in st.session_state["vinyl_db"].iterrows():
-                with grid_cols[index % 4]:
+            for idx, (index, row) in enumerate(display_coll_df.iterrows()):
+                with grid_cols[idx % 4]:
                     if st.session_state["edit_row_coll"] == index:
                         st.markdown("**Editing Record...**")
                         e_artist = st.text_input("Artist", value=row["Artist"], key=f"e_art_coll_{index}")
@@ -225,6 +237,8 @@ with tab_collection_page:
                             sync_database("collection")
                             st.session_state["edit_row_coll"] = None
                             st.rerun()
+        else:
+            st.info("No matching records found in collection.")
 
 # ==============================================================================
 # TAB 2: WISHLIST PAGE
@@ -331,10 +345,22 @@ with tab_wishlist_page:
 
     with col_right_w:
         st.subheader(f"Wishlist ({len(st.session_state['wishlist_db'])} Records)")
-        if not st.session_state["wishlist_db"].empty:
+        
+        # --- LOCAL WISHLIST SEARCH BAR ---
+        filter_wish = st.text_input("🔎 Search Wishlist by Artist or Title:", key="filter_wish_input")
+        
+        display_wish_df = st.session_state["wishlist_db"]
+        if filter_wish.strip():
+            query_w = filter_wish.strip().lower()
+            display_wish_df = display_wish_df[
+                display_wish_df["Artist"].astype(str).str.lower().str.contains(query_w) |
+                display_wish_df["Album"].astype(str).str.lower().str.contains(query_w)
+            ]
+
+        if not display_wish_df.empty:
             grid_cols_w = st.columns(4)
-            for index, row in st.session_state["wishlist_db"].iterrows():
-                with grid_cols_w[index % 4]:
+            for idx, (index, row) in enumerate(display_wish_df.iterrows()):
+                with grid_cols_w[idx % 4]:
                     if st.session_state["edit_row_wish"] == index:
                         st.markdown("**Editing Wishlist Item...**")
                         we_artist = st.text_input("Artist", value=row["Artist"], key=f"we_art_wish_{index}")
@@ -384,3 +410,5 @@ with tab_wishlist_page:
                             sync_database("wishlist")
                             st.session_state["edit_row_wish"] = None
                             st.rerun()
+        else:
+            st.info("No matching records found in wishlist.")
