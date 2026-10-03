@@ -5,11 +5,11 @@ from streamlit_gsheets import GSheetsConnection
 import base64  # <-- Add this new import
 
 # Expand layout to fit a grid
-st.set_page_config(layout="wide", page_title="My Vinyl Collection", page_icon="vinyl.jpg")
+st.set_page_config(layout="wide", page_title="My Vinyl Collection", page_icon="pink_vinyl.png")
 
 # --- START OF MOBILE ICON HACK ---
 try:
-    with open("vinyl.jpg", "rb") as f:
+    with open("pink_vinyl.png", "rb") as f:
         encoded = base64.b64encode(f.read()).decode()
     
     st.markdown(
@@ -19,7 +19,7 @@ try:
             if (old) old.remove();
             var link = document.createElement('link');
             link.rel = 'apple-touch-icon';
-            link.href = 'data:vinyl/jpg;base64,{encoded}';
+            link.href = 'data:vinyl/png;base64,{encoded}';
             document.head.appendChild(link);
         " style="display:none;">
         """,
