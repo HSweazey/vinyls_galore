@@ -163,7 +163,7 @@ with col_left:
 
     st.write("---")
 
-    # --- MANUAL ENTRY FALLBACK (Expander remains the same) ---
+    # --- MANUAL ENTRY FALLBACK ---
     with st.expander("✏ Add Record Manually", expanded=st.session_state["show_manual"]):
         with st.form("manual_entry_form", clear_on_submit=True):
             m_barcode = st.text_input("Barcode (Optional):", value=st.session_state["failed_barcode"])
@@ -186,15 +186,19 @@ with col_left:
                         "Rating": m_rating
                     }])
                     
+                    # 1. Update the in-memory dataframe instantly
                     existing_data = pd.concat([existing_data, manual_row], ignore_index=True)
+                    
+                    # 2. Send the update to Google Sheets in the background
                     conn.update(worksheet="Sheet1", data=existing_data)
                     
+                    # 3. Reset session states
                     st.session_state["show_manual"] = False
                     st.session_state["failed_barcode"] = ""
                     st.session_state["edit_row"] = None
                     
+                    # 4. Show success message (st.rerun has been removed so you can actually see this)
                     st.success(f"Manually saved: **{m_artist} - {m_album}**")
-                    st.rerun()
                 else:
                     st.error("Artist and Album Title are required.")
 
