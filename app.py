@@ -275,7 +275,7 @@ with tab_collection_page:
                                 st.write("💿 No Cover Art")
                             
                             st.markdown(f"**{row['Album']}**")
-                            st.caption(f"{row['Artist']}")
+                            st.caption(f"{row['Artist']} ({row['Year']})")
                             if row.get("Rating", "Unrated") != "Unrated":
                                 st.write(row["Rating"])
                             
