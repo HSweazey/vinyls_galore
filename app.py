@@ -4,7 +4,6 @@ import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 import base64
 
-# Expand layout to fit a grid
 st.set_page_config(layout="wide", page_title="My Vinyl Collection", page_icon="vinyl.png")
 
 # --- START OF MOBILE ICON HACK ---
@@ -32,8 +31,14 @@ except Exception:
 # 1. Connect to Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- STATE MANAGEMENT FIX ---
-# Load from Google Sheets ONLY once when the app opens, then use local memory
+# --- NEW: CENTRALIZED SORT & SAVE FUNCTION ---
+def sync_database():
+    # 1. Sort alphabetically by Artist, then Album
+    st.session_state["vinyl_db"] = st.session_state["vinyl_db"].sort_values(by=["Artist", "Album"]).reset_index(drop=True)
+    # 2. Push the sorted data to Google Sheets
+    conn.update(worksheet="Sheet1", data=st.session_state["vinyl_db"])
+
+# Load from Google Sheets ONLY once when the app opens
 if "vinyl_db" not in st.session_state:
     df = conn.read(worksheet="Sheet1", ttl=0)
     
@@ -42,7 +47,11 @@ if "vinyl_db" not in st.session_state:
     if "Rating" not in df.columns:
         df["Rating"] = "Unrated"
         
-    st.session_state["vinyl_db"] = df.dropna(subset=["Barcode"]).reset_index(drop=True)
+    df = df.dropna(subset=["Barcode"])
+    
+    # Sort the initial load before saving to state
+    df = df.sort_values(by=["Artist", "Album"]).reset_index(drop=True)
+    st.session_state["vinyl_db"] = df
 
 DISCOGS_TOKEN = st.secrets["DISCOGS_TOKEN"]
 USER_AGENT = "MyVinylScannerApp/1.0"
@@ -90,9 +99,8 @@ with col_left:
                             "Year": year, "Genre": genre, "Cover_URL": cover_url, "Rating": "Unrated"
                         }])
                         
-                        # Update local memory FIRST, then backup to Google
                         st.session_state["vinyl_db"] = pd.concat([st.session_state["vinyl_db"], new_row], ignore_index=True)
-                        conn.update(worksheet="Sheet1", data=st.session_state["vinyl_db"])
+                        sync_database() # Sorts and pushes to Google
                         
                         st.session_state["show_manual"] = False
                         st.session_state["failed_barcode"] = ""
@@ -133,9 +141,8 @@ with col_left:
                             "Year": year, "Genre": genre, "Cover_URL": cover_url, "Rating": "Unrated"
                         }])
                         
-                        # Update local memory FIRST, then backup to Google
                         st.session_state["vinyl_db"] = pd.concat([st.session_state["vinyl_db"], new_row], ignore_index=True)
-                        conn.update(worksheet="Sheet1", data=st.session_state["vinyl_db"])
+                        sync_database() # Sorts and pushes to Google
                         
                         st.session_state["show_manual"] = False
                         st.session_state["edit_row"] = None
@@ -169,9 +176,8 @@ with col_left:
                         "Cover_URL": m_cover, "Rating": m_rating
                     }])
                     
-                    # Update local memory FIRST, then backup to Google
                     st.session_state["vinyl_db"] = pd.concat([st.session_state["vinyl_db"], manual_row], ignore_index=True)
-                    conn.update(worksheet="Sheet1", data=st.session_state["vinyl_db"])
+                    sync_database() # Sorts and pushes to Google
                     
                     st.session_state["show_manual"] = False
                     st.session_state["failed_barcode"] = ""
@@ -191,7 +197,7 @@ with col_right:
         for index, row in st.session_state["vinyl_db"].iterrows():
             with grid_cols[index % 4]:
                 
-                # Check if this specific record is in "Edit Mode"
+                # Edit Mode
                 if st.session_state["edit_row"] == index:
                     st.markdown("**Editing Record...**")
                     edit_artist = st.text_input("Artist", value=row["Artist"], key=f"edit_art_{index}")
@@ -210,7 +216,10 @@ with col_right:
                             st.session_state["vinyl_db"].at[index, "Artist"] = edit_artist
                             st.session_state["vinyl_db"].at[index, "Album"] = edit_album
                             st.session_state["vinyl_db"].at[index, "Rating"] = edit_rating
-                            conn.update(worksheet="Sheet1", data=st.session_state["vinyl_db"])
+                            
+                            with st.spinner("Saving..."):
+                                sync_database() # Sorts and pushes to Google
+                            
                             st.session_state["edit_row"] = None
                             st.rerun()
                     with col_cancel:
@@ -219,7 +228,7 @@ with col_right:
                             st.rerun()
                             
                 else:
-                    # View Mode UI
+                    # View Mode
                     if pd.notna(row.get("Cover_URL")) and str(row["Cover_URL"]).startswith("http"):
                         st.image(row["Cover_URL"], use_container_width=True)
                     else:
@@ -236,9 +245,11 @@ with col_right:
                         st.session_state["edit_row"] = index
                         st.rerun()
                         
-                    if st.button("🗑️️ Delete", key=f"delete_{index}"):
-                        # Drop row and reset index so grid placement remains stable
+                    if st.button("🗑 Delete", key=f"delete_{index}"):
                         st.session_state["vinyl_db"] = st.session_state["vinyl_db"].drop(index).reset_index(drop=True)
-                        conn.update(worksheet="Sheet1", data=st.session_state["vinyl_db"])
+                        
+                        with st.spinner("Deleting..."):
+                            sync_database() # Sorts and pushes to Google
+                        
                         st.session_state["edit_row"] = None
                         st.rerun()
