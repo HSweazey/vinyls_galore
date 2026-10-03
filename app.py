@@ -4,7 +4,7 @@ import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 
 # Update the top of your app.py to include page_icon
-st.set_page_config(layout="wide", page_title="My Vinyl Collection", page_icon="💿")
+st.set_page_config(layout="wide", page_title="My Vinyl Collection", page_icon="pink_vinyl.png")
 
 st.title("💿 Vinyl Database Scanner")
 
