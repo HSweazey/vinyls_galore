@@ -180,4 +180,5 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
-.streamlit
+.streamlit/*.json
+.streamlit/secrets.toml

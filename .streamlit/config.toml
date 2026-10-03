@@ -1,0 +1,14 @@
+[theme]
+# The main accent color (used for the scanner button and active states)
+primaryColor = "#2196F3"
+
+# The main background color (a very light, icy blue)
+backgroundColor = "#F0F8FF"
+
+# The background color for sidebars and input widgets (a slightly darker pastel blue)
+secondaryBackgroundColor = "#E3F2FD"
+
+# The text color (a deep navy blue for readability)
+textColor = "#0D47A1"
+
+font = "sans serif"
