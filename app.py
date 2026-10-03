@@ -57,59 +57,113 @@ if "edit_row" not in st.session_state:
 col_left, col_right = st.columns([1, 2])
 
 with col_left:
-    st.subheader("Scan New Record")
+    st.subheader("Add New Record")
     
-    # 2. Scanner Interface
-    with st.form("scanner_form", clear_on_submit=True):
-        barcode = st.text_input("Scan Barcode Here:")
-        submitted = st.form_submit_button("Search & Save")
+    # Organize the search methods into tabs
+    tab_scan, tab_text = st.tabs(["📷 Scan Barcode", "🔍 Search by Name"])
+    
+    # --- TAB 1: BARCODE SCANNER ---
+    with tab_scan:
+        with st.form("scanner_form", clear_on_submit=True):
+            barcode = st.text_input("Scan Barcode Here:")
+            submitted_barcode = st.form_submit_button("Search & Save")
 
-    # 3. Lookup and Save Logic
-    if submitted and barcode:
-        with st.spinner(f"Querying Discogs for {barcode}..."):
-            url = f"https://api.discogs.com/database/search?barcode={barcode}&token={DISCOGS_TOKEN}"
-            response = requests.get(url, headers={"User-Agent": USER_AGENT})
-            
-            if response.status_code == 200:
-                results = response.json().get("results", [])
+        if submitted_barcode and barcode:
+            with st.spinner(f"Querying Discogs for {barcode}..."):
+                url = f"https://api.discogs.com/database/search?barcode={barcode}&token={DISCOGS_TOKEN}"
+                response = requests.get(url, headers={"User-Agent": USER_AGENT})
                 
-                if results:
-                    match = results[0]
-                    title_split = match.get("title", "Unknown - Unknown").split(" - ", 1)
-                    artist = title_split[0]
-                    album = title_split[1] if len(title_split) > 1 else match.get("title")
-                    year = match.get("year", "Unknown")
-                    genre = ", ".join(match.get("genre", []))
-                    cover_url = match.get("cover_image", "") 
+                if response.status_code == 200:
+                    results = response.json().get("results", [])
                     
-                    new_row = pd.DataFrame([{
-                        "Barcode": barcode,
-                        "Artist": artist,
-                        "Album": album,
-                        "Year": year,
-                        "Genre": genre,
-                        "Cover_URL": cover_url,
-                        "Rating": "Unrated"
-                    }])
-                    
-                    existing_data = pd.concat([existing_data, new_row], ignore_index=True)
-                    conn.update(worksheet="Sheet1", data=existing_data)
-                    
-                    st.session_state["show_manual"] = False
-                    st.session_state["failed_barcode"] = ""
-                    st.session_state["edit_row"] = None # Close any open edits
-                    
-                    st.success(f"Successfully saved: **{artist} - {album}**")
+                    if results:
+                        match = results[0]
+                        title_split = match.get("title", "Unknown - Unknown").split(" - ", 1)
+                        artist = title_split[0]
+                        album = title_split[1] if len(title_split) > 1 else match.get("title")
+                        year = match.get("year", "Unknown")
+                        genre = ", ".join(match.get("genre", []))
+                        cover_url = match.get("cover_image", "") 
+                        
+                        new_row = pd.DataFrame([{
+                            "Barcode": barcode,
+                            "Artist": artist,
+                            "Album": album,
+                            "Year": year,
+                            "Genre": genre,
+                            "Cover_URL": cover_url,
+                            "Rating": "Unrated"
+                        }])
+                        
+                        existing_data = pd.concat([existing_data, new_row], ignore_index=True)
+                        conn.update(worksheet="Sheet1", data=existing_data)
+                        
+                        st.session_state["show_manual"] = False
+                        st.session_state["failed_barcode"] = ""
+                        st.session_state["edit_row"] = None
+                        st.success(f"Successfully saved: **{artist} - {album}**")
+                    else:
+                        st.session_state["failed_barcode"] = barcode
+                        st.session_state["show_manual"] = True
+                        st.error("Barcode not found. Fill out the manual form below:")
                 else:
-                    st.session_state["failed_barcode"] = barcode
-                    st.session_state["show_manual"] = True
-                    st.error("Barcode not found in Discogs. Fill out the manual form below:")
-            else:
-                st.error(f"API Error: {response.status_code}")
+                    st.error(f"API Error: {response.status_code}")
+
+    # --- TAB 2: TEXT SEARCH ---
+    with tab_text:
+        with st.form("text_search_form", clear_on_submit=True):
+            search_artist = st.text_input("Artist Name (e.g., Fleetwood Mac):")
+            search_title = st.text_input("Album Title (e.g., Rumours):")
+            submitted_text = st.form_submit_button("Search & Save")
+            
+        if submitted_text and (search_artist or search_title):
+            with st.spinner(f"Querying Discogs for '{search_title}' by '{search_artist}'..."):
+                # Using a params dictionary safely handles spaces and special characters in names
+                params = {
+                    "artist": search_artist,
+                    "title": search_title,
+                    "format": "vinyl",
+                    "token": DISCOGS_TOKEN
+                }
+                response = requests.get("https://api.discogs.com/database/search", headers={"User-Agent": USER_AGENT}, params=params)
+                
+                if response.status_code == 200:
+                    results = response.json().get("results", [])
+                    
+                    if results:
+                        match = results[0]
+                        title_split = match.get("title", "Unknown - Unknown").split(" - ", 1)
+                        artist = title_split[0]
+                        album = title_split[1] if len(title_split) > 1 else match.get("title")
+                        year = match.get("year", "Unknown")
+                        genre = ", ".join(match.get("genre", []))
+                        cover_url = match.get("cover_image", "") 
+                        
+                        new_row = pd.DataFrame([{
+                            "Barcode": "N/A",  # No barcode for text searches
+                            "Artist": artist,
+                            "Album": album,
+                            "Year": year,
+                            "Genre": genre,
+                            "Cover_URL": cover_url,
+                            "Rating": "Unrated"
+                        }])
+                        
+                        existing_data = pd.concat([existing_data, new_row], ignore_index=True)
+                        conn.update(worksheet="Sheet1", data=existing_data)
+                        
+                        st.session_state["show_manual"] = False
+                        st.session_state["edit_row"] = None
+                        st.success(f"Successfully saved top vinyl match: **{artist} - {album}**")
+                    else:
+                        st.session_state["show_manual"] = True
+                        st.error("No vinyl records found matching that search. Fill out the manual form below:")
+                else:
+                    st.error(f"API Error: {response.status_code}")
 
     st.write("---")
 
-    # 4. Manual Entry Form (Expander)
+    # --- MANUAL ENTRY FALLBACK (Expander remains the same) ---
     with st.expander("✏ Add Record Manually", expanded=st.session_state["show_manual"]):
         with st.form("manual_entry_form", clear_on_submit=True):
             m_barcode = st.text_input("Barcode (Optional):", value=st.session_state["failed_barcode"])
